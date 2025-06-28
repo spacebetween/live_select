@@ -221,6 +221,24 @@ defmodule LiveSelectTagsTest do
 
       assert_selected_multiple_static(live, ~w(B D))
     end
+
+    test "disabled options stay disabled", %{live: live} do
+      stub_options([{"A", 1, true}, {"B", 2, false}, {"C", 3, false}, {"D", 4, false}])
+
+      type(live, "ABC")
+      select_nth_option(live, 2, method: :click)
+
+      type(live, "ABC")
+      select_nth_option(live, 3, method: :click)
+      assert_selected_multiple(live, [%{value: 2, label: "B"}, %{value: 3, label: "C"}])
+
+      unselect_nth_option(live, 2)
+      assert_selected_multiple(live, [%{value: 2, label: "B"}])
+
+      type(live, "ABC")
+      select_nth_option(live, 1, method: :click)
+      assert_selected_multiple(live, [%{value: 2, label: "B"}])
+    end
   end
 
   test "can remove selected options by clicking on tag", %{live: live} do
@@ -313,10 +331,24 @@ defmodule LiveSelectTagsTest do
   test "can be disabled", %{conn: conn} do
     {:ok, live, _html} = live(conn, "/?disabled=true&mode=tags")
 
+    stub_options(~w(A B C D))
+
+    type(live, "ABC")
+
+    select_nth_option(live, 1)
+
     assert element(live, selectors()[:text_input])
            |> render()
            |> Floki.parse_fragment!()
            |> Floki.attribute("disabled") == ["disabled"]
+
+    assert render(live)
+           |> Floki.parse_fragment!()
+           |> Floki.attribute(selectors()[:hidden_input], "disabled") == ["disabled"]
+
+    assert render(live)
+           |> Floki.parse_fragment!()
+           |> Floki.find(selectors()[:clear_tag_button]) == []
   end
 
   test "can clear the selection", %{conn: conn} do
@@ -425,10 +457,9 @@ defmodule LiveSelectTagsTest do
       element(live, selectors()[:text_input])
       |> render_focus()
 
-      assert_push_event(live, "parent_event", %{
+      assert_push_event(live, "select", %{
         id: "my_form_city_search_live_select_component",
-        event: "focus-event-for-parent",
-        payload: %{id: "my_form_city_search_live_select_component"}
+        parent_event: "focus-event-for-parent"
       })
     end
 
@@ -533,5 +564,61 @@ defmodule LiveSelectTagsTest do
       %{label: "B", value: value2},
       %{label: "C", value: value3}
     ])
+  end
+
+  test "disabled options can't be selected", %{live: live} do
+    stub_options([{"A", 1, true}, {"B", 2, false}, {"C", 3, false}])
+
+    type(live, "ABC")
+    select_nth_option(live, 1, method: :click)
+    refute_selected(live)
+
+    type(live, "ABC")
+    select_nth_option(live, 2, method: :click)
+    assert_selected_multiple(live, [%{label: "B", value: 2}])
+  end
+
+  test "selecting clears the options and current input text", %{live: live} do
+    stub_options(%{
+      "A" => 1,
+      "B" => 2,
+      "C" => 3
+    })
+
+    type(live, "ABC")
+
+    select_nth_option(live, 2)
+
+    assert_selected_multiple(live, [%{label: "B", value: 2}], "")
+
+    select_nth_option(live, 1)
+
+    assert_selected_multiple_static(live, [%{label: "B", value: 2}])
+  end
+
+  describe "when keep_options_on_select = true" do
+    setup %{conn: conn} do
+      {:ok, live, _html} = live(conn, "/?mode=tags&keep_options_on_select=true")
+
+      %{live: live}
+    end
+
+    test "selecting does not clear the options or the current input text", %{live: live} do
+      stub_options(%{
+        "A" => 1,
+        "B" => 2,
+        "C" => 3
+      })
+
+      type(live, "ABC")
+
+      select_nth_option(live, 2)
+
+      assert_selected_multiple(live, [%{label: "B", value: 2}], "ABC")
+
+      select_nth_option(live, 1)
+
+      assert_selected_multiple(live, [%{label: "B", value: 2}, %{label: "A", value: 1}], "ABC")
+    end
   end
 end

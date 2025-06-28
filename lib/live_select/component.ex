@@ -19,6 +19,8 @@ defmodule LiveSelect.Component do
     clear_button_extra_class: nil,
     clear_tag_button_class: nil,
     clear_tag_button_extra_class: nil,
+    keep_options_on_select: false,
+    current_text: "",
     user_defined_options: false,
     container_class: nil,
     container_extra_class: nil,
@@ -28,6 +30,7 @@ defmodule LiveSelect.Component do
     dropdown_extra_class: nil,
     max_selectable: 0,
     mode: :single,
+    no_basic_styles_for_clear_buttons: false,
     option_class: nil,
     option_extra_class: nil,
     options: [],
@@ -63,7 +66,7 @@ defmodule LiveSelect.Component do
       tag: ~W(p-1 text-sm rounded-lg bg-blue-400 flex)
     ],
     daisyui: [
-      active_option: ~W(active),
+      active_option: ~W(active menu-active),
       available_option: ~W(cursor-pointer),
       unavailable_option: ~W(disabled),
       clear_button: ~W(hidden cursor-pointer),
@@ -91,7 +94,6 @@ defmodule LiveSelect.Component do
         active_option: -1,
         hide_dropdown: true,
         awaiting_update: true,
-        last_selection: nil,
         selection: [],
         value_mapper: & &1
       )
@@ -171,16 +173,20 @@ defmodule LiveSelect.Component do
 
     socket =
       if Map.has_key?(assigns, :value) do
-        update(socket, :selection, fn
-          selection, %{options: options, value: value, mode: mode, value_mapper: value_mapper} ->
-            update_selection(value, selection, options, mode, value_mapper)
-        end)
-        |> client_select(%{input_event: true})
+        socket =
+          update(socket, :selection, fn
+            selection,
+            %{options: options, value: value, mode: mode, value_mapper: value_mapper} ->
+              update_selection(value, selection, options, mode, value_mapper)
+          end)
+
+        client_select(socket, %{
+          input_event: true,
+          current_text: new_current_text_after_selection(socket)
+        })
       else
         socket
       end
-
-    socket = maybe_save_selection(socket)
 
     {:ok, socket}
   end
@@ -188,9 +194,22 @@ defmodule LiveSelect.Component do
   @impl true
   def handle_event("blur", _params, socket) do
     socket =
-      maybe_restore_selection(socket)
+      socket
       |> assign(:hide_dropdown, true)
-      |> client_select(%{parent_event: socket.assigns[:"phx-blur"]})
+      |> client_select(%{
+        parent_event: socket.assigns[:"phx-blur"],
+        current_text:
+          cond do
+            socket.assigns.mode == :single && socket.assigns.selection != [] ->
+              List.first(socket.assigns.selection).label
+
+            socket.assigns.mode == :single && socket.assigns.selection == [] ->
+              ""
+
+            true ->
+              socket.assigns.current_text
+          end
+      })
 
     {:noreply, socket}
   end
@@ -199,13 +218,11 @@ defmodule LiveSelect.Component do
   def handle_event(event, _params, socket) when event in ~w(focus click) do
     socket =
       socket
-      |> then(
-        &if &1.assigns.mode == :single do
-          clear(&1, %{input_event: false, parent_event: &1.assigns[:"phx-focus"]})
-        else
-          parent_event(&1, &1.assigns[:"phx-focus"], %{id: &1.assigns.id})
-        end
-      )
+      |> client_select(%{
+        input_event: false,
+        parent_event: socket.assigns[:"phx-focus"],
+        current_text: socket.assigns.current_text
+      })
       |> assign(hide_dropdown: false)
 
     {:noreply, socket}
@@ -252,7 +269,7 @@ defmodule LiveSelect.Component do
   def handle_event("options_clear", _params, socket) do
     socket =
       socket
-      |> assign(current_text: nil, options: [])
+      |> assign(current_text: "", options: [])
 
     {:noreply, socket}
   end
@@ -294,9 +311,13 @@ defmodule LiveSelect.Component do
   def handle_event("keydown", %{"key" => "Escape"}, socket) do
     socket =
       socket
-      |> maybe_restore_selection
       |> assign(:hide_dropdown, true)
-      |> client_select(%{})
+      |> client_select(%{
+        current_text:
+          if(socket.assigns.mode == :single && socket.assigns.selection != [],
+            do: List.first(socket.assigns.selection).label
+          )
+      })
 
     {:noreply, socket}
   end
@@ -317,7 +338,6 @@ defmodule LiveSelect.Component do
   def handle_event("clear", _params, socket) do
     socket =
       socket
-      |> assign(last_selection: nil)
       |> clear(%{input_event: true})
 
     {:noreply, socket}
@@ -400,7 +420,7 @@ defmodule LiveSelect.Component do
          } = socket,
          extra_params
        )
-       when is_binary(current_text) do
+       when current_text != "" do
     {:ok, option} = normalize_option(current_text)
 
     if already_selected?(option, socket.assigns.selection) do
@@ -448,12 +468,20 @@ defmodule LiveSelect.Component do
   end
 
   defp select(
+         socket,
+         %{disabled: true} = _selected,
+         _extra_params
+       ) do
+    socket
+  end
+
+  defp select(
          %{assigns: %{selection: selection, max_selectable: max_selectable}} = socket,
          _selected,
          _extra_params
        )
        when max_selectable > 0 and length(selection) >= max_selectable do
-    assign(socket, hide_dropdown: not quick_tags_mode?(socket))
+    socket
   end
 
   defp select(socket, selected, extra_params) do
@@ -464,14 +492,32 @@ defmodule LiveSelect.Component do
         [selected]
       end
 
-    socket
-    |> assign(
-      active_option: if(quick_tags_mode?(socket), do: socket.assigns.active_option, else: -1),
-      selection: selection,
-      hide_dropdown: not quick_tags_mode?(socket)
+    socket =
+      socket
+      |> assign(
+        active_option: if(quick_tags_mode?(socket), do: socket.assigns.active_option, else: -1),
+        selection: selection,
+        hide_dropdown: not quick_tags_mode?(socket)
+      )
+      |> then(
+        &if keep_options_on_select?(&1) do
+          &1
+        else
+          assign(&1, %{options: [], current_text: ""})
+        end
+      )
+
+    client_select(
+      socket,
+      Map.merge(
+        %{
+          input_event: true,
+          parent_event: if(socket.assigns.mode == :single, do: socket.assigns[:"phx-blur"]),
+          current_text: new_current_text_after_selection(socket)
+        },
+        extra_params
+      )
     )
-    |> maybe_save_selection()
-    |> client_select(Map.merge(%{input_event: true}, extra_params))
   end
 
   defp unselect(socket, pos) do
@@ -485,24 +531,6 @@ defmodule LiveSelect.Component do
     client_select(socket, %{input_event: true})
   end
 
-  defp maybe_save_selection(socket) do
-    socket
-    |> update(:last_selection, fn
-      _, %{selection: selection, mode: :single} when selection != [] -> selection
-      last_selection, _ -> last_selection
-    end)
-  end
-
-  defp maybe_restore_selection(socket) do
-    update(socket, :selection, fn
-      _, %{last_selection: last_selection, mode: :single} when last_selection != nil ->
-        last_selection
-
-      selection, _ ->
-        selection
-    end)
-  end
-
   defp clear(socket, params) do
     socket
     |> assign(selection: [])
@@ -510,30 +538,16 @@ defmodule LiveSelect.Component do
   end
 
   defp client_select(socket, extra_params) do
-    parent_event = if socket.assigns.mode == :single, do: socket.assigns[:"phx-blur"]
-
     socket
     |> push_event(
       "select",
       %{
         id: socket.assigns.id,
         mode: socket.assigns.mode,
-        selection: socket.assigns.selection,
-        parent_event: parent_event
+        selection: socket.assigns.selection
       }
       |> Map.merge(extra_params)
     )
-  end
-
-  defp parent_event(socket, nil, _payload), do: socket
-
-  defp parent_event(socket, event, payload) do
-    socket
-    |> push_event("parent_event", %{
-      id: socket.assigns.id,
-      event: event,
-      payload: payload
-    })
   end
 
   defp update_selection(nil, _current_selection, _options, _mode, _value_mapper), do: []
@@ -585,6 +599,41 @@ defmodule LiveSelect.Component do
     )
   end
 
+  defp normalize_option(option) when is_list(option) do
+    if Keyword.keyword?(option) do
+      Map.new(option)
+      |> normalize_option()
+    else
+      :error
+    end
+  end
+
+  defp normalize_option(option) when is_map(option) do
+    case option do
+      %{key: key, value: _value} = option ->
+        {:ok, Enum.into(option, %{label: key, disabled: false})}
+
+      %{value: value} = option ->
+        {:ok, Enum.into(option, %{label: value, disabled: false})}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp normalize_option(option) when is_tuple(option) do
+    case option do
+      {label, value} ->
+        {:ok, %{label: label, value: value, disabled: false}}
+
+      {label, value, disabled} ->
+        {:ok, %{label: label, value: value, disabled: disabled}}
+
+      _ ->
+        :error
+    end
+  end
+
   defp normalize_option(option) do
     case option do
       nil ->
@@ -593,25 +642,8 @@ defmodule LiveSelect.Component do
       "" ->
         {:ok, nil}
 
-      %{key: key, value: _value} = option ->
-        {:ok, Map.put_new(option, :label, key)}
-
-      %{value: value} = option ->
-        {:ok, Map.put_new(option, :label, value)}
-
-      option when is_list(option) ->
-        if Keyword.keyword?(option) do
-          Map.new(option)
-          |> normalize_option()
-        else
-          :error
-        end
-
-      {label, value} ->
-        {:ok, %{label: label, value: value}}
-
       option when is_binary(option) or is_atom(option) or is_number(option) ->
-        {:ok, %{label: option, value: option}}
+        {:ok, %{label: option, value: option, disabled: false}}
 
       _ ->
         :error
@@ -693,6 +725,23 @@ defmodule LiveSelect.Component do
     socket.assigns.mode == :quick_tags
   end
 
+  defp keep_options_on_select?(socket) do
+    socket.assigns.keep_options_on_select || quick_tags_mode?(socket)
+  end
+
+  defp new_current_text_after_selection(socket) do
+    cond do
+      socket.assigns.mode == :single && socket.assigns.selection != [] ->
+        List.first(socket.assigns.selection).label
+
+      keep_options_on_select?(socket) ->
+        socket.assigns.current_text
+
+      true ->
+        ""
+    end
+  end
+
   defp next_selectable(%{
          selection: selection,
          active_option: active_option,
@@ -711,7 +760,8 @@ defmodule LiveSelect.Component do
     options
     |> Enum.with_index()
     |> Enum.reject(fn {opt, _} ->
-      active_option == opt || (mode != :quick_tags && already_selected?(opt, selection))
+      active_option == opt || (mode != :quick_tags && already_selected?(opt, selection)) ||
+        Map.get(opt, :disabled)
     end)
     |> Enum.map(fn {_, idx} -> idx end)
     |> Enum.find(active_option, &(&1 > active_option))
@@ -736,7 +786,8 @@ defmodule LiveSelect.Component do
     |> Enum.with_index()
     |> Enum.reverse()
     |> Enum.reject(fn {opt, _} ->
-      active_option == opt || (mode != :quick_tags && already_selected?(opt, selection))
+      active_option == opt || (mode != :quick_tags && already_selected?(opt, selection)) ||
+        Map.get(opt, :disabled)
     end)
     |> Enum.map(fn {_, idx} -> idx end)
     |> Enum.find(active_option, &(&1 < active_option || active_option == -1))
@@ -744,12 +795,7 @@ defmodule LiveSelect.Component do
 
   defp x(assigns) do
     ~H"""
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      class={["w-5 h-5"]}
-    >
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
       <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
     </svg>
     """

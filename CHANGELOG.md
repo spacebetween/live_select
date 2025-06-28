@@ -1,3 +1,19 @@
+## 1.7.0 (2025-06-19)
+
+* DaisyUI 5 compatibility - active options now include both `active` and `menu-active` classes for compatibility with DaisyUI 3, 4, and 5
+* Add `keep_options_on_select` flag. By default, when not in `quick_tags` mode, input text field and list of selectable options are now cleared after selection. This flag suppresses this behavior   
+* Positioning and sizing clear buttons entirely using JS
+* `no_basic_styles_for_clear_buttons` flag to suppress basic positioning and styling of clear buttons
+
+## 1.6.0 (2025-04-13)
+
+* add ability to disable options
+
+## 1.5.5 (2025-03-31)
+
+* make clear buttons also honor the disabled attribute
+* remember entered text when blurring away from the element
+
 ## 1.5.4 (2025-01-29)
 
 * Fix [bug](https://github.com/maxmarcon/live_select/issues/98) causing selection recovery to fail if Phoenix uses the built-in JSON module from Elixir 1.18

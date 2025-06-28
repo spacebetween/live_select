@@ -65,7 +65,6 @@ defmodule LiveSelectTest do
     stub_options([{"A", 1}, {"B", 2}, {"C", 3}])
 
     {:ok, live, _html} = live(conn, "/")
-
     type(live, "ABC")
 
     assert_options(live, ["A", "B", "C"])
@@ -212,8 +211,30 @@ defmodule LiveSelectTest do
       element(live, "#{selectors()[:container]} [phx-click=clear]")
       |> render_click()
 
-      assert_clear(live)
+      assert_clear_selection(live)
     end
+  end
+
+  test "the clear button can be disabled", %{conn: conn} do
+    {:ok, live, _html} = live(conn, "/?allow_clear=true&disabled=true")
+
+    stub_options([{"A", 1}, {"B", 1}])
+
+    type(live, "ABC")
+
+    select_nth_option(live, 1)
+
+    assert element(live, selectors()[:text_input])
+           |> render()
+           |> Floki.parse_fragment!()
+           |> Floki.attribute("disabled") == ["disabled"]
+
+    assert element(live, selectors()[:hidden_input])
+           |> render()
+           |> Floki.parse_fragment!()
+           |> Floki.attribute("disabled") == ["disabled"]
+
+    refute has_element?(live, selectors()[:clear_button])
   end
 
   test "can render custom clear button", %{conn: conn} do
@@ -408,13 +429,13 @@ defmodule LiveSelectTest do
     end
 
     test "the text input field is cleared", %{live: live} do
-      assert_clear(live, false)
+      assert_set_text_field(live, "")
     end
 
     test "hitting Escape restores the selection", %{live: live} do
       keydown(live, "Escape")
 
-      assert_selected_static(live, :B, 2)
+      assert_set_text_field(live, :B)
     end
 
     test "blurring the field restores the selection", %{live: live} do
@@ -458,6 +479,8 @@ defmodule LiveSelectTest do
       element(live, selectors()[:text_input])
       |> render_blur()
 
+      type(live, "ABC")
+
       send_update(live, value: 3)
 
       element(live, selectors()[:text_input])
@@ -494,13 +517,13 @@ defmodule LiveSelectTest do
     end
 
     test "the text input field is cleared", %{live: live} do
-      assert_clear(live, false)
+      assert_set_text_field(live, "")
     end
 
     test "hitting Escape restores the selection", %{live: live} do
       keydown(live, "Escape")
 
-      assert_selected_static(live, :B, 2)
+      assert_set_text_field(live, :B)
     end
 
     test "blurring the field restores the selection", %{live: live} do
@@ -564,6 +587,7 @@ defmodule LiveSelectTest do
     navigate(live, 1, :up)
 
     assert_option_active(live, 3)
+    assert_active_event(live, 3)
   end
 
   test "navigating down selects the first option", %{conn: conn} do
@@ -576,6 +600,7 @@ defmodule LiveSelectTest do
     navigate(live, 1, :down)
 
     assert_option_active(live, 1)
+    assert_active_event(live, 1)
   end
 
   test "dropdown becomes visible when typing", %{conn: conn} do
@@ -677,7 +702,7 @@ defmodule LiveSelectTest do
 
     send_update(live, value: nil)
 
-    assert_clear(live)
+    assert_clear_selection(live)
   end
 
   test "can force the selection", %{conn: conn} do
@@ -694,6 +719,8 @@ defmodule LiveSelectTest do
     select_nth_option(live, 2)
 
     assert_selected(live, :B, 2)
+
+    type(live, "ABC")
 
     send_update(live, value: 3)
 
@@ -771,7 +798,7 @@ defmodule LiveSelectTest do
 
     render_change(live, "change", %{"my_form" => %{"city_search" => ""}})
 
-    assert_clear_static(live)
+    assert_clear_selection_static(live)
   end
 
   test "selection recovery (1)", %{conn: conn} do
@@ -966,6 +993,117 @@ defmodule LiveSelectTest do
           ~W(foo)
         )
       end
+    end
+  end
+
+  describe "with disabled option" do
+    test "disabled options are skipped when navigating down with keyboard", %{conn: conn} do
+      stub_options([{"A", 1, false}, {"B", 2, true}, {"C", 3, false}])
+
+      {:ok, live, _html} = live(conn, "/")
+
+      type(live, "ABC")
+      assert_options(live, ["A", "B", "C"])
+
+      select_nth_option(live, 2)
+      assert_selected(live, "C", 3)
+    end
+
+    test "disabled options are skipped when navigating up with keyboard", %{conn: conn} do
+      stub_options([{"A", 1, false}, {"B", 2, true}, {"C", 3, false}])
+
+      {:ok, live, _html} = live(conn, "/")
+
+      type(live, "ABC")
+      assert_options(live, ["A", "B", "C"])
+
+      # Navigate to C by going two down
+      navigate(live, 2, :down)
+
+      # Navigate back to A by going 1 up as we skip B because it's disabled.
+      # Then select the item we're on. It should be "A"
+      navigate(live, 1, :up)
+      keydown(live, "Enter")
+
+      assert_selected(live, "A", 1)
+    end
+
+    test "options can be disabled when passed as enumerable of maps", %{conn: conn} do
+      stub_options([
+        %{label: "A", value: 1, disabled: false},
+        %{label: "B", value: 2, disabled: true},
+        %{label: "C", value: 3, disabled: false}
+      ])
+
+      {:ok, live, _html} = live(conn, "/")
+
+      type(live, "ABC")
+      assert_options(live, ["A", "B", "C"])
+
+      select_nth_option(live, 1)
+      assert_selected(live, "A", 1)
+
+      type(live, "ABC")
+      assert_options(live, ["A", "B", "C"])
+      # The maps are sorted on their key value pairings on the showcase page
+      # before being sent to the LiveSelect component. This results in the
+      # disabled option "B" being sorted last.
+      select_nth_option(live, 3, method: :click)
+      assert_selected_static(live, "A", 1)
+    end
+
+    test "disabled options can't be selected with mouseclick", %{conn: conn} do
+      stub_options([{"A", 1, false}, {"B", 2, true}, {"C", 3, false}])
+
+      {:ok, live, _html} = live(conn, "/")
+      type(live, "ABC")
+
+      assert_options(live, ["A", "B", "C"])
+      select_nth_option(live, 1)
+      assert_selected(live, "A", 1)
+
+      # Mouse clicks won't change the selected option
+      type(live, "ABC")
+      select_nth_option(live, 2, method: :click)
+      assert_selected_static(live, "A", 1)
+    end
+  end
+
+  test "selecting clears the options", %{conn: conn} do
+    {:ok, live, _html} = live(conn, "/")
+
+    stub_options(["A", "B", "C"])
+
+    type(live, "ABC")
+
+    select_nth_option(live, 2)
+
+    assert_selected(live, "B")
+
+    select_nth_option(live, 1)
+
+    assert_selected_static(live, "B")
+  end
+
+  describe "when keep_options_on_select = true" do
+    setup %{conn: conn} do
+      {:ok, live, _html} = live(conn, "/?keep_options_on_select=true")
+
+      %{live: live}
+    end
+
+    test " selecting does not clear the options", %{live: live} do
+      stub_options(["A", "B", "C"])
+
+      type(live, "ABC")
+
+      select_nth_option(live, 2)
+
+      assert_selected(live, "B")
+
+      select_nth_option(live, 1)
+
+      assert_selected(live, "A")
     end
   end
 end

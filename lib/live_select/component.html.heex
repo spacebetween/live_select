@@ -20,7 +20,7 @@
             <%= render_slot(@tag, option) %>
           <% end %>
           <button
-            :if={!option[:sticky]}
+            :if={!option[:sticky] && !@disabled}
             type="button"
             data-idx={idx}
             class={
@@ -29,7 +29,8 @@
                 :clear_tag_button,
                 @clear_tag_button_class,
                 @clear_tag_button_extra_class
-              )
+              ) ++
+                if @no_basic_styles_for_clear_buttons, do: [], else: ~w(ls-clear-tag-button)
             }
           >
             <%= if @clear_button == [] do %>
@@ -62,12 +63,15 @@
       phx_blur: "blur",
       value: label(@mode, @selection)
     ) %>
-    <%= if @mode == :single && @allow_clear && Enum.any?(@selection) do %>
+    <%= if @mode == :single && @allow_clear && !@disabled && Enum.any?(@selection) do %>
       <button
         type="button"
         phx-click="clear"
         phx-target={@myself}
-        class={class(@style, :clear_button, @clear_button_class, @clear_button_extra_class)}
+        class={
+          class(@style, :clear_button, @clear_button_class, @clear_button_extra_class) ++
+            if @no_basic_styles_for_clear_buttons, do: [], else: ~w(ls-clear-button)
+        }
       >
         <%= if @clear_button == [] do %>
           <.x />
@@ -109,6 +113,9 @@
       <%= for {option, idx} <- Enum.with_index(@options) do %>
         <li class={
           cond do
+            option.disabled ->
+              class(@style, :unavailable_option, @unavailable_option_class)
+
             already_selected?(option, @selection) ->
               class(@style, :selected_option, @selected_option_class)
 

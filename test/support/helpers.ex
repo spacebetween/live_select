@@ -75,7 +75,7 @@ defmodule LiveSelect.TestHelpers do
     clear_tag_button: "div[phx-hook=LiveSelect] > div:first-child > div > button",
     dropdown: "div[phx-hook=LiveSelect] > ul",
     dropdown_entries: "div[phx-hook=LiveSelect] > ul > li > div",
-    hidden_input: "input#my_form_city_search",
+    hidden_input: "div[phx-hook=LiveSelect] input[type=hidden]",
     option: "div[phx-hook=LiveSelect] > ul > li > div",
     tags_container: "div[phx-hook=LiveSelect] > div:first-child",
     tag: "div[phx-hook=LiveSelect] > div:first-child > div",
@@ -252,7 +252,8 @@ defmodule LiveSelect.TestHelpers do
       id: @component_id,
       selection: [%{label: ^label, value: ^value}],
       input_event: true,
-      mode: :single
+      mode: :single,
+      current_text: ^label
     })
   end
 
@@ -289,9 +290,9 @@ defmodule LiveSelect.TestHelpers do
   def normalize_selection(selection) do
     for element <- selection do
       if is_binary(element) || is_integer(element) || is_atom(element) do
-        %{value: element, label: element}
+        %{value: element, label: element, disabled: false}
       else
-        element
+        element |> Map.put_new(:disabled, false)
       end
     end
   end
@@ -328,6 +329,16 @@ defmodule LiveSelect.TestHelpers do
     assert_push_event(live, "select", %{
       id: @component_id,
       selection: ^normalized_selection
+    })
+  end
+
+  def assert_selected_multiple(live, selection, current_text) do
+    normalized_selection = assert_selected_multiple_static(live, selection)
+
+    assert_push_event(live, "select", %{
+      id: @component_id,
+      selection: ^normalized_selection,
+      current_text: ^current_text
     })
   end
 
@@ -406,17 +417,24 @@ defmodule LiveSelect.TestHelpers do
   def assert_unavailable_option_class(live, selected_pos, unavailable_class),
     do: assert_unavailable_option_class(render(live), selected_pos, unavailable_class)
 
-  def assert_clear(live, input_event \\ true) do
-    assert_clear_static(live)
+  def assert_clear_selection(live) do
+    assert_clear_selection_static(live)
 
     assert_push_event(live, "select", %{
       id: @component_id,
       selection: [],
-      input_event: ^input_event
+      input_event: true
     })
   end
 
-  def assert_clear_static(live) do
+  def assert_set_text_field(live, text) do
+    assert_push_event(live, "select", %{
+      id: @component_id,
+      current_text: ^text
+    })
+  end
+
+  def assert_clear_selection_static(live) do
     assert live
            |> element(@selectors[:hidden_input])
            |> render()
@@ -434,6 +452,15 @@ defmodule LiveSelect.TestHelpers do
     selector = "#{@selectors[:tags_container]} button[data-idx=#{n - 1}]"
 
     refute has_element?(live, selector)
+  end
+
+  def assert_active_event(live, active_option_idx) do
+    actual_idx = active_option_idx - 1
+
+    assert_push_event(live, "active", %{
+      id: @component_id,
+      idx: ^actual_idx
+    })
   end
 
   def navigate(live, n, dir, opts \\ []) do

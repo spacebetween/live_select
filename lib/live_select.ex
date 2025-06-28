@@ -18,7 +18,8 @@ defmodule LiveSelect do
   clicking an option with the mouse.
 
   Whenever an option is selected, `LiveSelect` will trigger a standard `phx-change` event in the form. See the "Examples" section
-  below for details on how to handle the event.
+  below for details on how to handle the event. In `single` and `tags` mode, the content of the input text field and the list of selectable options are cleared on selection.
+  To suppress this behavior, use the `keep_options_on_select` flag in the assigns.
 
   In single mode, if the configuration option `allow_clear` is set, the user can manually clear the selection by clicking on the `x` button on the input field.
   In tags mode, single tags can be removed by clicking on them.
@@ -56,6 +57,9 @@ defmodule LiveSelect do
   * _tuples_: `{label, value}` corresponding to label and value for the option
   * _maps_: `%{label: label, value: value}` or `%{value: value}`
   * _keywords_: `[label: label, value: value]` or `[value: value]`
+
+  Options can also be disabled when passing in tuples, maps or keywords. Disabled options are displayed, but can't be selected.
+  Maps and keywords need a `:disabled` key with a boolean value, and tuples should be a 3 element tuple of `{label, value, is_disabled}`
 
   In the case of maps and keywords, if only `value` is specified, it will be used as both value and label for the option.
 
@@ -102,6 +106,8 @@ defmodule LiveSelect do
 
   ## Slots
 
+  ### Options and tags
+
   You can control how your options and tags are rendered by using the `:option` and `:tag` slots.
   Both slots will be passed an option as argument. In the case of the `:option` slot, the option will have an
   extra boolean field `:selected`, which will be set to `true` if the option has been selected by the user.
@@ -128,6 +134,24 @@ defmodule LiveSelect do
   Here's the result:
 
   <img alt="slots" src="https://raw.githubusercontent.com/maxmarcon/live_select/main/priv/static/images/slots.png" width="200" />
+
+  ### Clear button
+
+  You can use the `:clear_button` slot to directly specify the inner HTML
+  of the button that clears the tags or the single selection (if `allow_clear` is set).
+
+  Example:
+
+  ```elixir
+  <.live_select
+      field={@form[:city_search]}
+      phx-target={@myself}
+    >
+      <:clear_button>
+        This my fancy clear button
+      </:clear_button>
+  </.live_select>
+  ```
 
   ## Controlling the selection programmatically
 
@@ -390,6 +414,10 @@ defmodule LiveSelect do
     doc:
       ~s(initial available options to select from. Note that, after the initial rendering of the component, options can only be updated using `Phoenix.LiveView.send_update/3` - See the "Options" section for details)
 
+  attr :keep_options_on_select, :boolean,
+    doc:
+      ~s(if `true`, the current list of selectable options and the content of the input text field are preserved upon selection)
+
   attr :value, :any, doc: "used to manually set a selection - overrides any values from the form.
   Must be a single element in `:single` mode, or a list of elements in `:tags` mode."
 
@@ -405,7 +433,7 @@ defmodule LiveSelect do
     doc:
       ~s(if `true`, when in single mode, display a "x" button in the input field to clear the selection)
 
-  attr :disabled, :boolean, doc: "set this to `true` to disable the input field"
+  attr :disabled, :boolean, doc: "set this to `true` to disable the component"
 
   attr :placeholder, :string, doc: "placeholder text for the input field"
 
@@ -449,7 +477,10 @@ defmodule LiveSelect do
     doc:
       "Event to emit when the text input receives focus. The component id will be sent in the event's params"
 
-  @styling_options ~w(active_option_class available_option_class clear_button_class clear_button_extra_class clear_tag_button_class clear_tag_button_extra_class container_class container_extra_class dropdown_class dropdown_extra_class option_class option_extra_class text_input_class text_input_extra_class text_input_selected_class selected_option_class tag_class tag_extra_class tags_container_class tags_container_extra_class)a
+  attr :no_basic_styles_for_clear_buttons, :boolean,
+    doc: "Do not apply basic size and positioning styles to clear buttons"
+
+  @styling_options ~w(active_option_class available_option_class unavailable_option_class clear_button_class clear_button_extra_class clear_tag_button_class clear_tag_button_extra_class container_class container_extra_class dropdown_class dropdown_extra_class option_class option_extra_class text_input_class text_input_extra_class text_input_selected_class selected_option_class tag_class tag_extra_class tags_container_class tags_container_extra_class)a
 
   for attr_name <- @styling_options do
     Phoenix.Component.Declarative.__attr__!(
